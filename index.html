@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gerador de Listas de Atendimento Médico</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    /* Estilo da impressão/PDF (renderizado fora do ecrã) */
+    #pdf-area { position: fixed; left: -10000px; top: 0; }
+    .pdf-page {
+      width: 210mm;
+      min-height: 297mm;
+      background: #ffffff;
+      color: #111827;
+      font-family: "Helvetica", "Arial", sans-serif;
+      padding: 14mm 12mm;
+      box-sizing: border-box;
+    }
+    .pdf-header { border-bottom: 3px solid #0d9488; padding-bottom: 8px; margin-bottom: 10px; }
+    .pdf-title { font-size: 20px; font-weight: 800; color: #0f766e; margin: 0; text-transform: uppercase; letter-spacing: .5px; }
+    .pdf-sub { font-size: 12px; color: #374151; margin-top: 2px; }
+    .pdf-meta { display: flex; gap: 24px; flex-wrap: wrap; font-size: 11px; margin-bottom: 10px; }
+    .pdf-meta b { color: #0f766e; }
+    table.pdf-table { width: 100%; border-collapse: collapse; }
+    table.pdf-table th {
+      background: #0d9488; color: #fff; font-size: 10px; text-align: left;
+      padding: 5px 6px; border: 1px solid #0d9488; text-transform: uppercase;
+    }
+    table.pdf-table td { border: 1px solid #cbd5e1; padding: 5px 6px; font-size: 10px; vertical-align: top; }
+    table.pdf-table tr:nth-child(even) td { background: #f0fdfa; }
+    td.pdf-num { font-weight: 700; text-align: center; width: 22px; }
+    td.pdf-name { font-weight: 700; font-size: 11px; }
+    td.pdf-detail { color: #374151; line-height: 1.45; word-break: break-word; }
+    .pdf-vazio { color: #9ca3af; }
+    .pdf-footer { margin-top: 14px; font-size: 9px; color: #6b7280; text-align: center; border-top: 1px solid #e5e7eb; padding-top: 6px; }
+    .compact td, .compact th { padding: 2px 5px !important; font-size: 8.5px !important; }
+    .compact td.pdf-name { font-size: 9px !important; }
+    /* Bloco de linhas por página quando há muitos pacientes */
+    .pdf-pagina-bloco { page-break-inside: avoid; break-inside: avoid; }
+
+    /* Drag & drop */
+    tr.dragging { opacity: .4; }
+    tr.drag-over { outline: 2px dashed #0d9488; outline-offset: -2px; }
+    @media (max-width: 768px) {
+      .hide-mobile { display: none; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 min-h-screen">
+
+  <!-- Barra superior -->
+  <header class="bg-teal-700 text-white shadow-lg">
+    <div class="max-w-5xl mx-auto px-4 py-5 flex items-center gap-3">
+      <span class="text-3xl">🩺</span>
+      <div>
+        <h1 class="text-xl md:text-2xl font-bold leading-tight">Lista de Atendimento Médico</h1>
+        <p class="text-teal-100 text-sm">Gere planilhas por especialidade e exporte em PDF</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- 1. Configurações gerais -->
+    <section class="bg-white rounded-xl shadow p-5">
+      <h2 class="text-lg font-semibold text-teal-800 mb-4 flex items-center gap-2">⚙️ Configurações do Atendimento</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Especialidade Médica *</label>
+          <input id="cfg-especialidade" list="especialidades" type="text" placeholder="Ex: Otorrinolaringologia"
+                 class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none" />
+          <datalist id="especialidades">
+            <option>Otorrinolaringologia</option><option>Pediatria</option><option>Cardiologia</option>
+            <option>Dermatologia</option><option>Ortopedia</option><option>Neurologia</option>
+            <option>Ginecologia</option><option>Oftalmologia</option><option>Clínica Geral</option>
+          </datalist>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Data do Atendimento *</label>
+          <input id="cfg-data" type="date" class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Horário do Atendimento <span class="text-slate-400">(opcional)</span></label>
+          <input id="cfg-horario" type="text" placeholder="Ex: 08:00 – 12:00"
+                 class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Profissional / Unidade de Saúde <span class="text-slate-400">(opcional)</span></label>
+          <input id="cfg-profissional" type="text" placeholder="Ex: Dra. Maria Silva – UBS Centro"
+                 class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+      </div>
+    </section>
+
+    <!-- 2. Formulário de paciente -->
+    <section class="bg-white rounded-xl shadow p-5">
+      <h2 id="pac-form-title" class="text-lg font-semibold text-teal-800 mb-4 flex items-center gap-2">➕ Adicionar Paciente</h2>
+      <form id="pac-form" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" autocomplete="off">
+        <div class="md:col-span-2 lg:col-span-3">
+          <label class="block text-sm font-medium text-slate-600 mb-1">Nome do Paciente *</label>
+          <input id="pac-nome" type="text" required placeholder="Nome completo"
+                 class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Nome da Mãe / Responsável</label>
+          <input id="pac-mae" type="text" placeholder="Nome da mãe ou responsável"
+                 class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Data de Nascimento</label>
+          <input id="pac-nascimento" type="date" class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">CPF</label>
+          <input id="pac-cpf" type="text" inputmode="numeric" maxlength="14" placeholder="000.000.000-00"
+                 class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Cartão SUS / CNS</label>
+          <input id="pac-sus" type="text" inputmode="numeric" maxlength="15" placeholder="7 números..."
+                 class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Telefone de Contacto</label>
+          <input id="pac-telefone" type="tel" maxlength="17" placeholder="(00) 00000-0000"
+                 class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-600 mb-1">Endereço / Rua</label>
+          <input id="pac-endereco" type="text" placeholder="Rua, número, bairro"
+                 class="w-full rounded-lg border-slate-300 border px-3 py-2 focus:ring-2 focus:ring-teal-500 outline-none" />
+        </div>
+        <div class="md:col-span-2 lg:col-span-3 flex flex-wrap gap-3 pt-1">
+          <button type="submit" id="btn-submit-pac"
+                  class="bg-teal-600 hover:bg-teal-700 text-white font-semibold px-6 py-2.5 rounded-lg shadow transition">
+            ➕ Adicionar Paciente
+          </button>
+          <button type="button" id="btn-cancel-edit" class="hidden bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold px-5 py-2.5 rounded-lg transition">
+            Cancelar edição
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- 3. Lista de pacientes -->
+    <section class="bg-white rounded-xl shadow p-5">
+      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <h2 class="text-lg font-semibold text-teal-800 flex items-center gap-2">
+          📋 Pacientes
+          <span id="contador" class="text-sm font-normal bg-teal-100 text-teal-800 rounded-full px-2.5 py-0.5">0</span>
+        </h2>
+        <p class="text-xs text-slate-500">Arraste as linhas ⠿ ou use as setas para reordenar</p>
+      </div>
+      <div class="overflow-x-auto -mx-2">
+        <table class="w-full text-sm min-w-[640px]">
+          <thead>
+            <tr class="bg-slate-50 text-slate-600 text-left border-b-2 border-teal-600">
+              <th class="px-2 py-2 w-8 text-center">#</th>
+              <th class="px-2 py-2 w-6"></th>
+              <th class="px-2 py-2">Paciente</th>
+              <th class="px-2 py-2 hide-mobile">Mãe / Responsável</th>
+              <th class="px-2 py-2 hide-mobile">Nascimento</th>
+              <th class="px-2 py-2 hide-mobile">CPF / SUS</th>
+              <th class="px-2 py-2 hide-mobile">Contacto / Endereço</th>
+              <th class="px-2 py-2 text-right">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="lista-corpo" class="divide-y divide-slate-100"></tbody>
+        </table>
+        <p id="lista-vazia" class="text-center text-slate-400 py-8 text-sm">Nenhum paciente adicionado ainda. Use o formulário acima. 🙂</p>
+      </div>
+    </section>
+
+    <!-- 4. Ações -->
+    <section class="bg-white rounded-xl shadow p-5 flex flex-wrap items-center gap-4">
+      <button id="btn-pdf"
+              class="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white text-lg font-bold px-8 py-3.5 rounded-xl shadow-lg transform hover:scale-[1.02] transition">
+        📄 Gerar PDF
+      </button>
+      <button id="btn-limpar" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-semibold px-5 py-3 rounded-xl transition">
+        🗑️ Limpar tudo
+      </button>
+      <p id="pdf-status" class="text-sm text-slate-500"></p>
+    </section>
+
+    <footer class="text-center text-xs text-slate-400 pb-6">
+      Os dados são guardados automaticamente neste navegador (localStorage).
+    </footer>
+  </main>
+
+  <!-- Área de renderização do PDF -->
+  <div id="pdf-area" aria-hidden="true"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
