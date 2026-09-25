@@ -11,7 +11,10 @@
     #pdf-area { position: fixed; left: -10000px; top: 0; }
     .pdf-page {
       width: 210mm;
-      min-height: 297mm;
+      /* SEM min-height: a página começa no topo. Se o contentor tivesse
+         altura mínima de 297mm, html2pdf centralizaria verticalmente a
+         imagem do conteúdo (mais curto) na folha A4, empurrando-o para
+         baixo. O conteúdo é colado ao topo e flui naturalmente. */
       background: #ffffff;
       color: #111827;
       font-family: "Helvetica", "Arial", sans-serif;

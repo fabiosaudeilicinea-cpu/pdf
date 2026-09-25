@@ -451,14 +451,68 @@ async function gerarPDF() {
 
   const nomeFicheiro = `Atendimento_${(state.config.especialidade || 'Geral').replace(/\s+/g, '_')}_${state.config.data}.pdf`;
 
+  /* Renderiza o documento para canvas e adiciona a imagem página a página
+     com jsPDF diretamente. Assim temos controlo exato da posição vertical:
+     cada fatia é COLADA NO TOPO da folha A4 (y = margem superior), e nunca
+     centralizada/empurrada para a parte inferior quando o conteúdo é mais
+     curto que a página — comportamento que o `save()` do html2pdf aplica. */
+  const MARGEM_MM = { topo: 14, lados: 12 };
+  const PAGE_H_PT = 841.89;                       // A4 em pontos
+  const mmParaPt = (mm) => mm * 72 / 25.4;
+  const pxParaPt = (px) => px * 72 / 96;          // CSS px @96dpi → pt
+
+  function dividirEmPaginas(canvas) {
+    const hConteudoPt = pxParaPt(canvas.height);
+    const margemTopoPt = mmParaPt(MARGEM_MM.topo);
+    // Cabe tudo numa única página? → uma fatia só, colada no topo.
+    if (margemTopoPt + hConteudoPt <= PAGE_H_PT - 1) {
+      return [{ yPx: 0, hPx: canvas.height }];
+    }
+    // Multi-página: fatias com altura da área útil (desconta as margens).
+    const altUtilPx = Math.floor((PAGE_H_PT - margemTopoPt * 2) * 96 / 72);
+    const fatias = [];
+    for (let y = 0; y < canvas.height; y += altUtilPx) {
+      fatias.push({ yPx: y, hPx: Math.min(altUtilPx, canvas.height - y) });
+    }
+    return fatias;
+  }
+
   try {
-    await html2pdf().set({
-      name: nomeFicheiro,
-      windowWidth: 794,      // largura A4 @96dpi
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      html2canvas: { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false },
-      pagebreak: { mode: ['css', 'legacy'], avoid: ['tr'] },
-    }).from(doc).save();
+    // 1) Renderiza o documento para canvas usando a pipeline do html2pdf
+    //    (método .toCanvas(), que devolve uma Promise do canvas).
+    const worker = html2pdf()
+      .set({
+        windowWidth: 794,      // largura A4 @96dpi
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        html2canvas: { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false },
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['tr'] },
+      })
+      .from(doc);
+    await worker.toPdf();                 // garante a instância jsPDF interna
+    const pdf = worker.pdf;               // usada só como "fabricante" de PDF
+
+    // 2) Descarta as páginas geradas pelo html2pdf (ele centraliza o
+    //    conteúdo verticalmente → empurra-o para a parte inferior da
+    //    folha) e volta a colar as fatias da imagem renderizada NO TOPO
+    //    de cada página A4, com controlo exato da posição.
+    while (pdf.getNumberOfPages() > 0) pdf.deletePage(1);
+    const canvas = pdf.__canvas__ || worker.canvas;
+
+    const larguraMm = 210 - MARGEM_MM.lados * 2;
+    const escala = larguraMm / (canvas.width / 2); // scale:2 → px CSS = canvas/2
+    const fatias = dividirEmPaginas(canvas);
+
+    for (const f of fatias) {
+      const slice = document.createElement('canvas');
+      slice.width = canvas.width;
+      slice.height = f.hPx;
+      slice.getContext('2d').drawImage(canvas, 0, f.yPx, canvas.width, f.hPx, 0, 0, canvas.width, f.hPx);
+      pdf.addPage();
+      const hMm = f.hPx / 2 * escala;
+      // colado no TOPO: y = margem superior (último argumento de addImage)
+      pdf.addImage(slice.toDataURL('image/jpeg', 0.95), 'JPEG', MARGEM_MM.lados, MARGEM_MM.topo, larguraMm, hMm);
+    }
+    pdf.save(nomeFicheiro);
     status.textContent = '✅ PDF gerado com sucesso!';
   } catch (err) {
     console.error(err);
